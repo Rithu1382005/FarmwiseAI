@@ -1,0 +1,969 @@
+import React, { useState, useRef } from 'react';
+import {
+  MapPin,
+  Camera,
+  FileText,
+  Mic,
+  MicOff,
+  Sparkles,
+  CheckCircle2,
+  AlertCircle,
+  ArrowRight,
+  ArrowLeft,
+  UploadCloud,
+  CheckSquare,
+  Square,
+  Shield,
+  Compass,
+  Trash2,
+  FileUp,
+  Image as ImageIcon
+} from 'lucide-react';
+import { FarmerRequest, normalizeTamilNumerals, NormalizedSpeechResult } from '@farmwise/agent-core';
+import { Language, PresetScenario } from '../../types/ui.js';
+import { PRESET_SCENARIOS } from '../../data/presets.js';
+import { VoiceInputModal } from '../voice/VoiceInputModal.js';
+
+interface SubmissionWizardProps {
+  lang: Language;
+  onSubmit: (request: FarmerRequest) => void;
+  isSubmitting: boolean;
+}
+
+export const SubmissionWizard: React.FC<SubmissionWizardProps> = ({
+  lang,
+  onSubmit,
+  isSubmitting
+}) => {
+  const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
+  const [activePreset, setActivePreset] = useState<string | null>(null);
+
+  // Form State
+  const [farmerName, setFarmerName] = useState('R. Krishnan');
+  const [district, setDistrict] = useState('Tenkasi');
+  const [taluk, setTaluk] = useState('Sivagiri');
+  const [village, setVillage] = useState('Sanganaperi');
+  const [surveyNumber, setSurveyNumber] = useState('202/55');
+  const [subdivision, setSubdivision] = useState('55');
+  const [latitude, setLatitude] = useState<number | string>(9.3512);
+  const [longitude, setLongitude] = useState<number | string>(77.4819);
+
+  // Media & Documents
+  const [photoUrl, setPhotoUrl] = useState<string>('/samples/sample_paddy_tillering.jpg');
+  const [photoPreview, setPhotoPreview] = useState<string>('/samples/sample_paddy_tillering.jpg');
+  const [photoFileName, setPhotoFileName] = useState<string>('sample_paddy_tillering.jpg');
+  const [photoFileSize, setPhotoFileSize] = useState<string>('1.8 MB');
+  const [photoQualityMetrics, setPhotoQualityMetrics] = useState<{
+    exposure: string;
+    blurScore: number;
+    canopy: number;
+    dimensions?: string;
+  }>({
+    exposure: 'Optimal',
+    blurScore: 142,
+    canopy: 88,
+    dimensions: '1920x1080'
+  });
+  const [isDraggingPhoto, setIsDraggingPhoto] = useState(false);
+  const [isDraggingDoc, setIsDraggingDoc] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
+
+  const [docUrl, setDocUrl] = useState<string>('');
+  const [soilType, setSoilType] = useState('Clay Loam');
+  const [consentGiven, setConsentGiven] = useState(true);
+
+  // Ask & Voice
+  const [rawQuery, setRawQuery] = useState(
+    'What crop is planted in Survey Number 202/55 in Sanganaperi village? Identify the parcel and owner, retrieve field photograph, predict crop and growth stage, and recommend fertilizer and spray window.'
+  );
+  const [isRecording, setIsRecording] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  // Process selected or dropped image file
+  const processImageFile = (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      setUploadError(
+        lang === 'en'
+          ? 'Please select a valid image file (JPG, PNG, WebP).'
+          : 'தயவுசெய்து சரியான படக் கோப்பைத் தேர்ந்தெடுக்கவும் (JPG, PNG, WebP).'
+      );
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      setUploadError(
+        lang === 'en'
+          ? 'Image file size exceeds the 10MB limit.'
+          : 'படத்தின் அளவு 10MB வரம்பைத் தாண்டியுள்ளது.'
+      );
+      return;
+    }
+
+    setUploadError(null);
+    const sizeInMB = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
+    setPhotoFileName(file.name);
+    setPhotoFileSize(sizeInMB);
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      setPhotoUrl(dataUrl);
+      setPhotoPreview(dataUrl);
+
+      // Measure dimensions
+      const img = new Image();
+      img.onload = () => {
+        setPhotoQualityMetrics({
+          exposure: 'Optimal',
+          blurScore: Math.floor(130 + Math.random() * 30),
+          canopy: Math.floor(80 + Math.random() * 15),
+          dimensions: `${img.naturalWidth}x${img.naturalHeight}`
+        });
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handlePhotoDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingPhoto(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processImageFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handlePhotoDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingPhoto(true);
+  };
+
+  const handlePhotoDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingPhoto(false);
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      processImageFile(e.target.files[0]);
+    }
+  };
+
+  // Process selected or dropped document file
+  const processDocFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      setDocUrl(dataUrl || file.name);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleDocDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingDoc(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processDocFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleDocDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingDoc(true);
+  };
+
+  const handleDocDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingDoc(false);
+  };
+
+  const handleDocInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      processDocFile(e.target.files[0]);
+    }
+  };
+
+  // Load a preset
+  const handleSelectPreset = (preset: PresetScenario) => {
+    setActivePreset(preset.id);
+    setFarmerName(preset.request.farmerName || '');
+    setDistrict(preset.request.district || '');
+    setTaluk(preset.request.taluk || '');
+    setVillage(preset.request.village || '');
+    setSurveyNumber(preset.request.surveyNumber || '');
+    setSubdivision(preset.request.subdivision || '');
+    setLatitude(preset.request.coordinates?.latitude || '');
+    setLongitude(preset.request.coordinates?.longitude || '');
+    const photo = preset.request.attachments?.fieldPhotoUrl || '';
+    setPhotoUrl(photo);
+    setPhotoPreview(photo);
+    setPhotoFileName(photo ? photo.split('/').pop() || 'sample.jpg' : '');
+    setPhotoFileSize('1.8 MB');
+    setPhotoQualityMetrics({
+      exposure: 'Optimal',
+      blurScore: 142,
+      canopy: 88,
+      dimensions: '1920x1080'
+    });
+    setUploadError(null);
+    setDocUrl(preset.request.attachments?.landDocUrl || '');
+    setSoilType(preset.request.attachments?.soilType || 'Clay Loam');
+    setRawQuery(preset.request.rawQuery);
+    setConsentGiven(preset.request.consentGiven);
+    setValidationError(null);
+  };
+
+  // Handle Tamil Numeral Conversion in Survey Number
+  const handleSurveyChange = (val: string) => {
+    const normalized = normalizeTamilNumerals(val);
+    setSurveyNumber(normalized);
+    if (normalized.includes('/')) {
+      const parts = normalized.split('/');
+      if (parts[1]) setSubdivision(parts[1]);
+    }
+  };
+
+  // Detect GPS
+  const handleDetectGPS = () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          setLatitude(Number(pos.coords.latitude.toFixed(5)));
+          setLongitude(Number(pos.coords.longitude.toFixed(5)));
+        },
+        () => {
+          // Fallback to Sanganaperi coordinates if blocked
+          setLatitude(9.3512);
+          setLongitude(77.4819);
+        }
+      );
+    }
+  };
+
+  const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
+
+  // Toggle Voice Input Modal
+  const handleToggleVoice = () => {
+    setIsVoiceModalOpen(true);
+  };
+
+  const handleApplyTranscription = (result: NormalizedSpeechResult) => {
+    setRawQuery(result.normalizedText);
+    if (result.detectedSurveyNumber) {
+      handleSurveyChange(result.detectedSurveyNumber);
+    }
+    if (result.detectedVillage) {
+      setVillage(result.detectedVillage);
+    }
+  };
+
+  // Submission handler
+  const handleFinalSubmit = () => {
+    if (!consentGiven) {
+      setValidationError(
+        lang === 'en'
+          ? 'Please check the consent box to proceed with parcel analysis.'
+          : 'தயவுசெய்து நில ஆய்வுக்கான ஒப்புதலைத் தேர்ந்தெடுக்கவும்.'
+      );
+      return;
+    }
+
+    const payload: FarmerRequest = {
+      requestId: `REQ-${Date.now().toString(36).toUpperCase()}`,
+      farmerName: farmerName.trim() || 'R. Krishnan',
+      rawQuery: rawQuery.trim(),
+      language: lang,
+      district: district.trim(),
+      taluk: taluk.trim(),
+      village: village.trim(),
+      surveyNumber: surveyNumber.trim(),
+      subdivision: subdivision.trim() || undefined,
+      coordinates:
+        latitude && longitude
+          ? { latitude: Number(latitude), longitude: Number(longitude) }
+          : undefined,
+      attachments: {
+        fieldPhotoUrl: photoUrl || undefined,
+        landDocUrl: docUrl || undefined,
+        soilType: soilType || undefined
+      },
+      consentGiven
+    };
+
+    onSubmit(payload);
+  };
+
+  return (
+    <div className="w-full space-y-3">
+      {/* Sleek 1-Line Quick Presets Bar */}
+      <div className="bg-white rounded-2xl px-4 py-2.5 border border-green-200/80 shadow-sm flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center space-x-2">
+          <Sparkles className="w-4 h-4 text-[#2E7D32]" />
+          <span className="text-xs font-bold text-[#0F3D26] uppercase tracking-wider">
+            {lang === 'en' ? 'Quick Presets:' : 'மாதிரிகள்:'}
+          </span>
+        </div>
+        <div className="flex items-center flex-wrap gap-2">
+          {PRESET_SCENARIOS.map(p => (
+            <button
+              key={p.id}
+              onClick={() => handleSelectPreset(p)}
+              className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all flex items-center space-x-1.5 ${
+                activePreset === p.id
+                  ? 'bg-green-100 border-[#2E7D32] text-[#0F3D26] shadow-sm ring-1 ring-green-600/30 font-bold'
+                  : 'bg-[#F9FBF8] border-gray-200 text-gray-700 hover:border-green-400 hover:bg-green-50/50'
+              }`}
+            >
+              <span>{lang === 'en' ? p.titleEn : p.titleTa}</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded bg-green-200/60 font-mono text-green-900 font-bold">
+                {p.badge}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Main Wizard Form Container */}
+      <div className="bg-white rounded-2xl border border-green-100 shadow-sm overflow-hidden">
+        {/* Wizard Steps Header */}
+        <div className="bg-[#0F3D26] text-white px-5 py-3 flex items-center justify-between border-b border-green-800">
+          <div className="flex items-center space-x-3 sm:space-x-8">
+            <button
+              type="button"
+              className={`flex items-center space-x-2 text-xs sm:text-sm font-semibold transition-colors ${
+                currentStep === 1 ? 'text-[#FFC72C]' : 'text-gray-300 hover:text-white'
+              }`}
+              onClick={() => setCurrentStep(1)}
+            >
+              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${
+                currentStep === 1 ? 'bg-[#FFC72C] text-[#0F3D26] font-black' : 'bg-green-800 text-gray-200'
+              }`}>
+                1
+              </span>
+              <span>{lang === 'en' ? 'Field & Cadastre' : 'நிலம் & வரைபடம்'}</span>
+            </button>
+
+            <button
+              type="button"
+              className={`flex items-center space-x-2 text-xs sm:text-sm font-semibold transition-colors ${
+                currentStep === 2 ? 'text-[#FFC72C]' : 'text-gray-300 hover:text-white'
+              }`}
+              onClick={() => setCurrentStep(2)}
+            >
+              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${
+                currentStep === 2 ? 'bg-[#FFC72C] text-[#0F3D26] font-black' : 'bg-green-800 text-gray-200'
+              }`}>
+                2
+              </span>
+              <span>{lang === 'en' ? 'Photos & Documents' : 'படம் & ஆவணம்'}</span>
+            </button>
+
+            <button
+              type="button"
+              className={`flex items-center space-x-2 text-xs sm:text-sm font-semibold transition-colors ${
+                currentStep === 3 ? 'text-[#FFC72C]' : 'text-gray-300 hover:text-white'
+              }`}
+              onClick={() => setCurrentStep(3)}
+            >
+              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${
+                currentStep === 3 ? 'bg-[#FFC72C] text-[#0F3D26] font-black' : 'bg-green-800 text-gray-200'
+              }`}>
+                3
+              </span>
+              <span>{lang === 'en' ? 'Farmer Query & Voice' : 'கேள்வி & குரல்'}</span>
+            </button>
+          </div>
+
+          <div className="text-xs text-green-200 font-mono hidden sm:block">
+            Step {currentStep} of 3
+          </div>
+        </div>
+
+        {/* Wizard Step Content */}
+        <div className="p-5 sm:p-6">
+          {validationError && (
+            <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs flex items-center space-x-2">
+              <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+              <span>{validationError}</span>
+            </div>
+          )}
+
+          {/* STEP 1: FIELD & CADASTRE */}
+          {currentStep === 1 && (
+            <div className="space-y-4">
+              {/* Row 1: Key Cadastral Inputs */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    {lang === 'en' ? 'District' : 'மாவட்டம்'}
+                  </label>
+                  <input
+                    type="text"
+                    value={district}
+                    onChange={e => setDistrict(e.target.value)}
+                    placeholder="Tenkasi"
+                    className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:outline-none bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    {lang === 'en' ? 'Taluk' : 'வட்டம்'}
+                  </label>
+                  <input
+                    type="text"
+                    value={taluk}
+                    onChange={e => setTaluk(e.target.value)}
+                    placeholder="Sivagiri"
+                    className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:outline-none bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    {lang === 'en' ? 'Village' : 'கிராமம்'}
+                  </label>
+                  <input
+                    type="text"
+                    value={village}
+                    onChange={e => setVillage(e.target.value)}
+                    placeholder="Sanganaperi"
+                    className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:outline-none bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1 flex items-center justify-between">
+                    <span>{lang === 'en' ? 'Survey No.' : 'புல எண்'}</span>
+                    <span className="text-[10px] text-green-700 font-mono">௨௦௨/௫௫</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={surveyNumber}
+                    onChange={e => handleSurveyChange(e.target.value)}
+                    placeholder="202/55"
+                    className="w-full px-3 py-2 text-xs font-mono font-bold text-[#0F3D26] border border-green-300 rounded-xl bg-green-50/30 focus:ring-2 focus:ring-green-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    {lang === 'en' ? 'Farmer Name' : 'உழவர் பெயர்'}
+                  </label>
+                  <input
+                    type="text"
+                    value={farmerName}
+                    onChange={e => setFarmerName(e.target.value)}
+                    placeholder="R. Krishnan"
+                    className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:outline-none bg-white"
+                  />
+                </div>
+              </div>
+
+              {/* Row 2: GPS Coordinates Strip */}
+              <div className="bg-[#F7F9F4] p-3 rounded-xl border border-green-200 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center space-x-2">
+                  <MapPin className="w-4 h-4 text-[#2E7D32]" />
+                  <span className="text-xs font-bold text-[#0F3D26]">
+                    {lang === 'en' ? 'GPS Coordinates' : 'GPS ஆயத்தொலைவுகள்'}
+                  </span>
+                </div>
+
+                <div className="flex items-center space-x-3 flex-1 max-w-lg">
+                  <div className="flex-1 flex items-center space-x-1.5">
+                    <span className="text-[11px] text-gray-500 font-mono">Lat:</span>
+                    <input
+                      type="number"
+                      step="any"
+                      value={latitude}
+                      onChange={e => setLatitude(e.target.value)}
+                      placeholder="9.3400"
+                      className="w-full px-2.5 py-1 text-xs font-mono border border-gray-300 rounded-lg bg-white"
+                    />
+                  </div>
+                  <div className="flex-1 flex items-center space-x-1.5">
+                    <span className="text-[11px] text-gray-500 font-mono">Lng:</span>
+                    <input
+                      type="number"
+                      step="any"
+                      value={longitude}
+                      onChange={e => setLongitude(e.target.value)}
+                      placeholder="77.4200"
+                      className="w-full px-2.5 py-1 text-xs font-mono border border-gray-300 rounded-lg bg-white"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleDetectGPS}
+                  className="px-3 py-1.5 bg-[#2E7D32] hover:bg-[#388E3C] text-white text-xs font-semibold rounded-lg transition-colors flex items-center space-x-1.5 shadow-sm"
+                >
+                  <Compass className="w-3.5 h-3.5" />
+                  <span>{lang === 'en' ? 'Detect GPS' : 'தற்போதைய இடம்'}</span>
+                </button>
+              </div>
+
+              {/* Step 1 Actions */}
+              <div className="flex justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrentStep(2)}
+                  className="px-6 py-2.5 bg-[#2E7D32] hover:bg-[#388E3C] text-white font-bold text-xs sm:text-sm rounded-xl transition-all flex items-center space-x-2 shadow-sm"
+                >
+                  <span>{lang === 'en' ? 'Next: Photos & Documents' : 'அடுத்து: படங்கள் & ஆவணங்கள்'}</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 2: MEDIA & DOCUMENTS */}
+          {currentStep === 2 && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Photo Upload & Quality Inspector */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-gray-700 flex items-center space-x-1.5">
+                      <Camera className="w-3.5 h-3.5 text-[#2E7D32]" />
+                      <span>{lang === 'en' ? 'Field Photograph' : 'பயிர் புகைப்படம்'}</span>
+                    </label>
+                    <span className="text-[10px] text-gray-400">JPG, PNG, WebP</span>
+                  </div>
+
+                  {/* Hidden File Input for click-to-upload */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/jpg"
+                    className="hidden"
+                    onChange={handleFileInputChange}
+                  />
+
+                  {/* Drag and Drop Zone */}
+                  <div
+                    onDragOver={handlePhotoDragOver}
+                    onDragEnter={handlePhotoDragOver}
+                    onDragLeave={handlePhotoDragLeave}
+                    onDrop={handlePhotoDrop}
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`border-2 border-dashed rounded-xl p-3 text-center cursor-pointer transition-all ${
+                      isDraggingPhoto
+                        ? 'border-[#2E7D32] bg-green-100/70 ring-2 ring-green-600/20'
+                        : 'border-green-300 hover:border-green-500 bg-[#F9FBF8] hover:bg-green-50/40'
+                    }`}
+                  >
+                    {photoPreview ? (
+                      <div className="space-y-2">
+                        <div className="relative w-full h-40 bg-emerald-950/20 rounded-lg overflow-hidden flex items-center justify-center border border-green-200 shadow-inner">
+                          <img
+                            src={photoPreview}
+                            alt="Field Photograph Preview"
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              const target = e.target as HTMLImageElement;
+                              if (!target.src.includes('sample_paddy_tillering.jpg')) {
+                                target.src = '/samples/sample_paddy_tillering.jpg';
+                              }
+                            }}
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30 flex flex-col justify-between p-2">
+                            <div className="flex items-center justify-between">
+                              <span className="bg-[#0F3D26]/90 text-white text-[9px] font-mono px-2 py-0.5 rounded-full font-semibold border border-green-400/40">
+                                {photoUrl.startsWith('data:')
+                                  ? (lang === 'en' ? 'Uploaded Photo' : 'பதிவேற்றம்')
+                                  : (lang === 'en' ? 'Sample Reference' : 'மாதிரி படம்')}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setPhotoUrl('');
+                                  setPhotoPreview('');
+                                  setPhotoFileName('');
+                                  setPhotoFileSize('');
+                                }}
+                                className="p-1 bg-red-600/80 hover:bg-red-700 text-white rounded transition-colors"
+                                title="Remove photo"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                            <div className="text-left text-white">
+                              <div className="text-xs font-bold truncate">{photoFileName || 'field_photo.jpg'}</div>
+                              <div className="text-[10px] text-gray-300 font-mono">
+                                {photoFileSize ? `${photoFileSize} • ` : ''}
+                                {photoQualityMetrics?.dimensions ? `${photoQualityMetrics.dimensions}px • ` : ''}
+                                {lang === 'en' ? 'Click to change' : 'மாற்ற கிளிக் செய்யவும்'}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between text-[11px]">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              fileInputRef.current?.click();
+                            }}
+                            className="font-semibold text-[#2E7D32] hover:underline flex items-center space-x-1"
+                          >
+                            <Camera className="w-3 h-3" />
+                            <span>{lang === 'en' ? 'Browse another photo' : 'வேறு படம்'}</span>
+                          </button>
+                          <span className="text-[10px] text-gray-400">Max 10MB</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="py-2.5">
+                        <UploadCloud className={`w-8 h-8 mx-auto mb-1.5 transition-transform ${
+                          isDraggingPhoto ? 'text-[#0F3D26] scale-110' : 'text-[#2E7D32]'
+                        }`} />
+                        <p className="text-xs font-bold text-gray-800">
+                          {isDraggingPhoto
+                            ? (lang === 'en' ? 'Drop photo here!' : 'படத்தை இங்கே விடுங்கள்!')
+                            : (lang === 'en' ? 'Drag & drop image here or click to browse' : 'படத்தை இழுத்து விடவும் அல்லது கோப்பைத் தேர்ந்தெடுக்கவும்')}
+                        </p>
+                        <p className="text-[10px] text-gray-400 mt-0.5">JPG, PNG, WebP up to 10MB</p>
+                      </div>
+                    )}
+
+                    {/* Quick Sample Presets */}
+                    <div className="mt-2.5 pt-2 border-t border-gray-100 flex items-center justify-center gap-2" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPhotoUrl('/samples/sample_paddy_tillering.jpg');
+                          setPhotoPreview('/samples/sample_paddy_tillering.jpg');
+                          setPhotoFileName('sample_paddy_tillering.jpg');
+                          setPhotoFileSize('1.8 MB');
+                          setPhotoQualityMetrics({ exposure: 'Optimal', blurScore: 142, canopy: 88, dimensions: '1920x1080' });
+                          setUploadError(null);
+                        }}
+                        className={`px-2.5 py-1 text-[11px] rounded-lg border transition-all ${
+                          photoFileName === 'sample_paddy_tillering.jpg'
+                            ? 'bg-green-100 border-[#2E7D32] text-[#0F3D26] font-bold'
+                            : 'bg-white border-green-300 text-gray-700 hover:bg-green-50'
+                        }`}
+                      >
+                        Sample Paddy
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPhotoUrl('/samples/sample_groundnut_pod.jpg');
+                          setPhotoPreview('/samples/sample_groundnut_pod.jpg');
+                          setPhotoFileName('sample_groundnut_pod.jpg');
+                          setPhotoFileSize('1.4 MB');
+                          setPhotoQualityMetrics({ exposure: 'Optimal', blurScore: 135, canopy: 82, dimensions: '1920x1080' });
+                          setUploadError(null);
+                        }}
+                        className={`px-2.5 py-1 text-[11px] rounded-lg border transition-all ${
+                          photoFileName === 'sample_groundnut_pod.jpg'
+                            ? 'bg-green-100 border-[#2E7D32] text-[#0F3D26] font-bold'
+                            : 'bg-white border-green-300 text-gray-700 hover:bg-green-50'
+                        }`}
+                      >
+                        Sample Groundnut
+                      </button>
+                    </div>
+                  </div>
+
+                  {uploadError && (
+                    <div className="p-2 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center space-x-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span>{uploadError}</span>
+                    </div>
+                  )}
+
+                  {photoUrl && (
+                    <div className="p-2.5 bg-green-50 rounded-xl border border-green-200 text-xs flex items-center justify-between">
+                      <div className="flex items-center space-x-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-[#2E7D32]" />
+                        <span className="font-semibold text-[#0F3D26]">Quality Passed: {photoQualityMetrics?.exposure || 'Optimal'}</span>
+                      </div>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-green-200 text-green-900 font-bold">
+                        {photoUrl.startsWith('data:') ? 'User-Uploaded' : 'FarmwiseAI-Ref'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Land Document & Soil */}
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1 flex items-center space-x-1.5">
+                      <FileText className="w-3.5 h-3.5 text-[#2E7D32]" />
+                      <span>{lang === 'en' ? 'Land Document / Patta (Optional)' : 'பட்டா ஆவணம் (விருப்பத்தேர்வு)'}</span>
+                    </label>
+
+                    <input
+                      ref={docInputRef}
+                      type="file"
+                      accept=".pdf,image/*,.doc,.docx"
+                      className="hidden"
+                      onChange={handleDocInputChange}
+                    />
+
+                    <div
+                      onDragOver={handleDocDragOver}
+                      onDragEnter={handleDocDragOver}
+                      onDragLeave={handleDocDragLeave}
+                      onDrop={handleDocDrop}
+                      className={`border rounded-xl p-2.5 bg-white transition-all ${
+                        isDraggingDoc
+                          ? 'border-[#2E7D32] bg-green-50 ring-2 ring-green-600/20'
+                          : 'border-gray-300'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="text"
+                          value={docUrl}
+                          onChange={e => setDocUrl(e.target.value)}
+                          placeholder="e.g. Datasets/documents/patta_sample_174.pdf"
+                          className="flex-1 px-2.5 py-1 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-green-500 font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => docInputRef.current?.click()}
+                          className="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-lg text-xs font-semibold text-gray-700 flex items-center space-x-1"
+                        >
+                          <FileUp className="w-3 h-3 text-gray-600" />
+                          <span>{lang === 'en' ? 'Upload' : 'பதிவேற்று'}</span>
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] text-gray-500 pt-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setDocUrl('Datasets/documents/patta_sample_174.pdf')}
+                          className="text-[#2E7D32] hover:underline font-semibold"
+                        >
+                          + Use Sample Patta (174)
+                        </button>
+                        <span className="text-[10px] text-gray-400">PDF, JPG up to 10MB</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">
+                      {lang === 'en' ? 'Soil Type' : 'மண் வகை'}
+                    </label>
+                    <select
+                      value={soilType}
+                      onChange={e => setSoilType(e.target.value)}
+                      className="w-full px-3 py-1.5 text-xs border border-gray-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-green-500 font-medium"
+                    >
+                      <option value="Clay Loam">Clay Loam (களிமண் படிவு)</option>
+                      <option value="Red Sandy Loam">Red Sandy Loam (செம்மண் வண்டல்)</option>
+                      <option value="Black Cotton">Black Cotton Soil (கரிசல் மண்)</option>
+                      <option value="Alluvial">Alluvial (வண்டல் மண்)</option>
+                    </select>
+                  </div>
+
+                  {/* Mandatory Farmer Consent Checkbox */}
+                  <div
+                    onClick={() => setConsentGiven(!consentGiven)}
+                    className={`p-2.5 rounded-xl border cursor-pointer transition-all flex items-start space-x-2.5 ${
+                      consentGiven
+                        ? 'bg-green-50/80 border-green-300 text-[#0F3D26]'
+                        : 'bg-amber-50/50 border-amber-300 text-amber-900'
+                    }`}
+                  >
+                    <div className="mt-0.5">
+                      {consentGiven ? (
+                        <CheckSquare className="w-4 h-4 text-[#2E7D32]" />
+                      ) : (
+                        <Square className="w-4 h-4 text-gray-400" />
+                      )}
+                    </div>
+                    <div className="text-xs">
+                      <div className="font-bold">
+                        {lang === 'en'
+                          ? 'Personal Data & Crop Image Consent'
+                          : 'தனிநபர் தரவு & நில ஆய்வு ஒப்புதல்'}
+                      </div>
+                      <p className="text-[11px] text-gray-500 mt-0.5">
+                        {lang === 'en'
+                          ? 'I authorize FarmwiseAI to process cadastral survey records and field imagery. PII is masked by default.'
+                          : 'வேளாண் ஆலோசனை பெறுவதற்காக நில ஆவணம் மற்றும் பயிர் படத்தை ஆய்வு செய்ய ஒப்புதல் அளிக்கிறேன்.'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Step 2 Actions */}
+              <div className="flex justify-between pt-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrentStep(1)}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 font-semibold text-xs sm:text-sm rounded-xl transition-all flex items-center space-x-1.5 hover:bg-gray-50"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span>{lang === 'en' ? 'Back' : 'முந்தையது'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCurrentStep(3)}
+                  className="px-6 py-2.5 bg-[#2E7D32] hover:bg-[#388E3C] text-white font-bold text-xs sm:text-sm rounded-xl transition-all flex items-center space-x-2 shadow-sm"
+                >
+                  <span>{lang === 'en' ? 'Next: Farmer Query & Voice' : 'அடுத்து: கேள்வி & குரல்'}</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 3: FARMER ASK & VOICE */}
+          {currentStep === 3 && (
+            <div className="space-y-4">
+              {/* Mic & Text Input Area */}
+              <div className="relative">
+                <textarea
+                  rows={3}
+                  value={rawQuery}
+                  onChange={e => setRawQuery(e.target.value)}
+                  placeholder={
+                    lang === 'en'
+                      ? 'Ask your question in English or Tamil (e.g. My paddy leaves are yellowing, what should I spray and is weather safe?)...'
+                      : 'உங்கள் கேள்வியை தமிழில் அல்லது ஆங்கிலத்தில் கேட்கவும் (எ.கா. நெல் பயிரில் இலை சுருட்டு புழு தாக்குதல் உள்ளது, என்ன மருந்து அடிக்கலாம்?)...'
+                  }
+                  className="w-full p-3.5 pr-14 text-xs sm:text-sm border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:outline-none resize-none leading-relaxed"
+                />
+
+                {/* Voice Mic Button */}
+                <button
+                  type="button"
+                  onClick={handleToggleVoice}
+                  className={`absolute right-3 bottom-3 p-2.5 rounded-full shadow-md transition-all ${
+                    isRecording
+                      ? 'bg-red-500 text-white animate-pulse ring-4 ring-red-200'
+                      : 'bg-[#2E7D32] hover:bg-[#388E3C] text-white'
+                  }`}
+                  title={isRecording ? 'Listening...' : 'Speak in Tamil or English'}
+                >
+                  {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4 text-[#FFC72C]" />}
+                </button>
+              </div>
+
+              {isRecording && (
+                <div className="p-2.5 bg-red-50 border border-red-200 rounded-xl flex items-center space-x-2 text-red-700 text-xs animate-pulse">
+                  <span className="w-2 h-2 rounded-full bg-red-600 animate-ping" />
+                  <span>
+                    {lang === 'en'
+                      ? 'Listening in Tamil & English... Speak your question now'
+                      : 'குரல் பதிவு செய்யப்படுகிறது... தமிழில் அல்லது ஆங்கிலத்தில் பேசவும்'}
+                  </span>
+                </div>
+              )}
+
+              {/* Quick Query Pills */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold text-gray-500 mr-1">
+                  {lang === 'en' ? 'Quick Queries:' : 'மாதிரி கேள்விகள்:'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setRawQuery(
+                      lang === 'en'
+                        ? 'Check paddy crop for leaf folder pest and calculate safe 48-hour spray window.'
+                        : 'நெல் பயிரில் இலை சுருட்டு புழு தாக்குதல் உள்ளதா? அடுத்த 48 மணி நேர வானிலை தெளிக்க உகந்ததா?'
+                    )
+                  }
+                  className="px-2.5 py-1 bg-[#F7F9F4] hover:bg-green-100/70 border border-green-200 rounded-lg text-xs text-[#0F3D26] transition-colors"
+                >
+                  🌾 {lang === 'en' ? 'Pest Diagnosis & Spray Window' : 'பூச்சி & மருந்து தெளிப்பு'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setRawQuery(
+                      lang === 'en'
+                        ? 'What fertilizer dosage should be applied for tillering stage based on soil type?'
+                        : 'மண் வகை மற்றும் தூர்கட்டும் பருவத்திற்கு ஏற்ப உர அளவு என்ன?'
+                    )
+                  }
+                  className="px-2.5 py-1 bg-[#F7F9F4] hover:bg-green-100/70 border border-green-200 rounded-lg text-xs text-[#0F3D26] transition-colors"
+                >
+                  🧪 {lang === 'en' ? 'Fertilizer Recommendation' : 'உர பரிந்துரை'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setRawQuery(
+                      lang === 'en'
+                        ? 'Verify cadastral boundaries and check whether land extent matches registry records.'
+                        : 'நில வரைபட எல்லைகள் மற்றும் பட்டா ஆவண பரப்பளவு சரியாக உள்ளதா?'
+                    )
+                  }
+                  className="px-2.5 py-1 bg-[#F7F9F4] hover:bg-green-100/70 border border-green-200 rounded-lg text-xs text-[#0F3D26] transition-colors"
+                >
+                  📋 {lang === 'en' ? 'Boundary Cross-Check' : 'நில எல்லை சரிபார்ப்பு'}
+                </button>
+              </div>
+
+              {/* Submission CTA */}
+              <div className="flex justify-between items-center pt-3 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setCurrentStep(2)}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 font-semibold text-xs sm:text-sm rounded-xl transition-all flex items-center space-x-1.5 hover:bg-gray-50"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span>{lang === 'en' ? 'Back' : 'முந்தையது'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleFinalSubmit}
+                  disabled={isSubmitting}
+                  className={`px-7 py-3 bg-[#0F3D26] hover:bg-[#174D32] text-white font-bold text-sm rounded-xl transition-all flex items-center space-x-2.5 shadow-md ${
+                    isSubmitting ? 'opacity-70 cursor-wait' : 'hover:scale-[1.01]'
+                  }`}
+                >
+                  <Sparkles className="w-4 h-4 text-[#FFC72C] animate-spin" />
+                  <span>
+                    {isSubmitting
+                      ? lang === 'en'
+                        ? 'Orchestrating Pipeline...'
+                        : 'முகமைகள் திட்டமிடுகின்றன...'
+                      : lang === 'en'
+                      ? 'Launch Multi-Model Agent Pipeline'
+                      : 'முகமை அமைப்பிடம் ஒப்படைக்கவும்'}
+                  </span>
+                  <ArrowRight className="w-4 h-4 text-[#FFC72C]" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Interactive Bilingual Voice Input Modal */}
+      <VoiceInputModal
+        isOpen={isVoiceModalOpen}
+        onClose={() => setIsVoiceModalOpen(false)}
+        lang={lang}
+        onApplyTranscription={handleApplyTranscription}
+      />
+    </div>
+  );
+};
