@@ -266,6 +266,7 @@ export default function App() {
                   embedded={true}
                   activeParcel={advisoryData?.parcel}
                   lang={lang}
+                  isOfficerView={isOfficerView}
                 />
               </div>
 
@@ -347,6 +348,7 @@ export default function App() {
         onClose={() => setIsChatOpen(false)}
         activeParcel={advisoryData?.parcel}
         lang={lang}
+        isOfficerView={isOfficerView}
       />
 
       <ImageUploadModal

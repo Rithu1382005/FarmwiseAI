@@ -1,75 +1,145 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Send, Bot, Camera, Loader2, Mic, MicOff, Globe, RotateCcw, Volume2, VolumeX } from 'lucide-react';
-import { api } from '../services/api';
-import { ensureTamilChatReply } from '../utils/translations';
-
-const QUICK_PROMPTS = [
-  "What fertilizer is best for coconut palms in Tenkasi?",
-  "What is the current market rate for Paddy in Tamil Nadu mandis?",
-  "How should I manage Fall Armyworm in Maize crops?",
-  "Is the weather suitable for spraying pesticides today?",
-  "Can you identify my crop stage from photo?"
-];
+import { 
+  X, 
+  Send, 
+  Bot, 
+  Camera, 
+  Loader2, 
+  Mic, 
+  MicOff, 
+  RotateCcw, 
+  Volume2, 
+  VolumeX,
+  Copy,
+  Check,
+  ThumbsUp,
+  ThumbsDown,
+  Sparkles,
+  History,
+  Plus,
+  ShieldAlert,
+  Tag,
+  Wrench,
+  AlertTriangle
+} from 'lucide-react';
+import { api, classifyRiskTier, MODEL_CONFIG } from '../services/api';
+import { ensureTamilChatReply, tCrop } from '../utils/translations';
 
 const QUICK_PROMPTS_TA = [
-  "தென்காசி பகுதியில் தென்னைக்கு எந்த உரம் சிறந்தது?",
-  "தமிழ்நாடு மண்டிகளில் நெல் தற்போதைய சந்தை விலை என்ன?",
-  "மக்காச்சோளத்தில் படைப்புழுவை எவ்வாறு கட்டுப்படுத்துவது?",
-  "இன்று பூச்சிக்கொல்லி மருந்து தெளிக்க வானிலை உகந்ததா?",
-  "புகைப்படத்தைப் பார்த்து பயிரின் வளர்ச்சி நிலையை கூற முடியுமா?"
+  "இன்று உரம் இடலாமா?",
+  "தென்னைக்கு உகந்த உரம் எது?",
+  "இன்றைய மண்டி சந்தை விலை என்ன?",
+  "மழை வாய்ப்பு & தெளிக்கும் நேரம்",
+  "மண் அமிலத்தன்மைக்கு என்ன செய்வது?"
+];
+
+const QUICK_PROMPTS_EN = [
+  "Can I apply fertilizer today?",
+  "What is the best fertilizer for coconut?",
+  "What is the current mandi market price?",
+  "Rain forecast & safe spray window",
+  "How to treat acidic laterite soil?"
 ];
 
 const getWelcomeMessage = (l, parcel) => ({
+  id: 'msg-welcome',
   sender: 'bot',
   text: l === 'ta'
-    ? `வணக்கம் விவசாயி அவர்களே! நான் உங்கள் பார்ம்வைஸ் AI நேரடி வேளாண் ஆலோசகர்.${parcel?.survey_number ? ` (புல எண் #${parcel.survey_number} நில விவரங்கள் இணைக்கப்பட்டுள்ளன)` : ''}\n\nஉங்களுக்கு உதவக்கூடிய சேவைகள்:\n• உரம் & ஊட்டச்சத்து அட்டவணை (TNAU பரிந்துரைத்த யூரியா, பொட்டாஷ் அளவுகள்)\n• பூச்சி & நோய் கட்டுப்பாடு (இயற்கை NSKE & பாதுகாப்பு முறை)\n• வானிலை & மருந்து தெளிக்கும் நேரம் (மழை மற்றும் காற்றின் வேகம்)\n• நேரடி மண்டி சந்தை விலைகள் (தென்காசி, திருநெல்வேலி APMC)\n\n🎤 குறிப்பு: மைக் பொத்தானை அழுத்தி தமிழில் பேசலாம், அல்லது கீழே உள்ள பொத்தான்களை கிளிக் செய்யலாம்!`
-    : `Vanakkam Farmer! I am your FarmwiseAI Live Agricultural Advisor.${parcel?.survey_number ? ` (Survey Parcel #${parcel.survey_number} is actively linked)` : ''}\n\nI can help you with:\n• Fertilizer & Nutrient Schedules (TNAU / ICAR dosages of Urea, DAP, Potash)\n• Pest & Disease Diagnostics and Integrated Management\n• Micro-Climate & Safe Foliar Spray Windows\n• Live Mandi Commodity Market Prices (Tenkasi, Tirunelveli APMC)\n\n🎤 Tip: Click the microphone to speak in Tamil or English, or tap the quick buttons below!`,
-  modelUsed: 'Ministral-8B + TNAU RAG',
-  confidence: 0.99,
-  sources: ['TNAU Crop Guide 2024', 'ICAR-CPCRI', 'eNAM APMC Mandi'],
+    ? `வணக்கம் விவசாயி அவர்களே! நான் உங்கள் பார்ம்வைஸ் AI நேரடி வேளாண் ஆலோசகர்.${parcel?.survey_number ? ` (புல எண் #${parcel.survey_number} • ${parcel.recorded_crop || 'தென்னை'} நில விவரங்கள் இணைக்கப்பட்டுள்ளன)` : ''}\n\nஉங்களுக்கு உதவக்கூடிய சேவைகள்:\n• **உரம் & ஊட்டச்சத்து அட்டவணை** (TNAU பரிந்துரைத்த யூரியா, பொட்டாஷ் அளவுகள்)\n• **பூச்சி & நோய் கட்டுப்பாடு** (இயற்கை NSKE & பாதுகாப்பு வழிகாட்டல்)\n• **வானிலை & தெளிக்கும் நேரம்** (மழை மற்றும் காற்றின் வேகம்)\n• **நேரடி மண்டி சந்தை விலைகள்** (தென்காசி, திருநெல்வேலி APMC)\n\n🎤 **குறிப்பு:** மைக் பொத்தானை அழுத்தி தமிழில் பேசலாம், அல்லது கீழே உள்ள குறிப்புகளை அழுத்தலாம்!`
+    : `Vanakkam Farmer! I am your FarmwiseAI Live Agricultural Assistant.${parcel?.survey_number ? ` (Survey Parcel #${parcel.survey_number} • ${parcel.recorded_crop || 'Coconut'} is actively linked)` : ''}\n\nI can help you with:\n• **Fertilizer & Nutrient Schedules** (TNAU / ICAR dosages of Urea, DAP, Potash)\n• **Pest & Disease Diagnostics** (Integrated pest management)\n• **Micro-Climate & Foliar Spray Windows** (Live Open-Meteo ECMWF)\n• **Live Mandi Commodity Rates** (Tenkasi & Tirunelveli APMC)\n\n🎤 **Tip:** Tap the mic to speak in Tamil or English, or tap the quick chips below!`,
+  modelUsed: 'Ministral-8B / Flash-Lite Tier',
+  riskTier: 'LOW',
+  confidence: 0.98,
+  sources: ['TNAU Crop Guide 2024', 'National Soil Health Card', 'Open-Meteo ECMWF'],
   time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 });
 
-export default function ChatbotDrawer({ isOpen = true, onClose, activeParcel, lang: propLang = 'en', embedded = false }) {
-  const [lang, setLang] = useState(propLang || 'en');
-  const [messages, setMessages] = useState([getWelcomeMessage(propLang || 'en', activeParcel)]);
+// Markdown lightweight formatter
+function renderFormattedMarkdown(text = '') {
+  const lines = text.split('\n');
+  return lines.map((line, idx) => {
+    // Bold parsing
+    const parts = line.split(/(\*\*[^*]+\*\*)/g);
+    const formattedParts = parts.map((part, pIdx) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return <strong key={pIdx} className="font-black text-slate-950">{part.slice(2, -2)}</strong>;
+      }
+      return part;
+    });
+
+    if (line.startsWith('• ') || line.startsWith('- ')) {
+      return (
+        <div key={idx} className="flex items-start gap-2 my-0.5 pl-1">
+          <span className="text-emerald-700 font-bold">•</span>
+          <span>{formattedParts}</span>
+        </div>
+      );
+    }
+    if (line.startsWith('⚠️') || line.startsWith('📌')) {
+      return (
+        <div key={idx} className="p-2.5 my-1.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-xs font-semibold">
+          {formattedParts}
+        </div>
+      );
+    }
+    if (!line.trim()) {
+      return <div key={idx} className="h-1.5" />;
+    }
+    return <p key={idx} className="my-0.5 leading-relaxed">{formattedParts}</p>;
+  });
+}
+
+export default function ChatbotDrawer({ 
+  isOpen = true, 
+  onClose, 
+  activeParcel, 
+  lang: propLang = 'ta', 
+  embedded = false,
+  isOfficerView = false
+}) {
+  const [lang, setLang] = useState(propLang || 'ta');
+  const [messages, setMessages] = useState([getWelcomeMessage(propLang || 'ta', activeParcel)]);
   const [input, setInput] = useState('');
   const [selectedImage, setSelectedImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
-
-  // Voice / language state
+  const [streamingText, setStreamingText] = useState('');
+  
+  // Voice state
   const [isRecording, setIsRecording] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
-
-  // Voice Output / TTS state (Farmer-first auto Tamil audio reply)
-  const [isVoiceOutputEnabled, setIsVoiceOutputEnabled] = useState(true);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [currentlySpeakingIdx, setCurrentlySpeakingIdx] = useState(null);
+  const [isVoiceOutputEnabled, setIsVoiceOutputEnabled] = useState(true);
+
+  // Chat memory sessions
+  const [savedSessions, setSavedSessions] = useState([]);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [copiedId, setCopiedId] = useState(null);
+  const [feedbackGiven, setFeedbackGiven] = useState({});
+
+  // Officer view demo: simulate outage/fallback
+  const [simulateOutage, setSimulateOutage] = useState(false);
+
   const utteranceRef = useRef(null);
+  const messagesContainerRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const recognitionRef = useRef(null);
 
   useEffect(() => {
-    if (propLang) {
-      setLang(propLang);
-    }
+    if (propLang) setLang(propLang);
   }, [propLang]);
 
-  // Preload and cache browser voices
+  // Load saved sessions from localStorage
   useEffect(() => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.getVoices();
-      const handleVoices = () => {
-        window.speechSynthesis.getVoices();
-      };
-      window.speechSynthesis.onvoiceschanged = handleVoices;
-      return () => {
-        window.speechSynthesis.onvoiceschanged = null;
-        window.speechSynthesis.cancel();
-      };
-    }
+    try {
+      const stored = localStorage.getItem('farmwise_chat_sessions');
+      if (stored) {
+        setSavedSessions(JSON.parse(stored));
+      }
+    } catch (e) {}
   }, []);
 
-  // Update initial message when activeParcel or lang changes if only 1 message
+  // Sync initial welcome message if only 1 message
   useEffect(() => {
     setMessages(prev => {
       if (prev.length <= 1) {
@@ -79,15 +149,7 @@ export default function ChatbotDrawer({ isOpen = true, onClose, activeParcel, la
     });
   }, [activeParcel?.survey_number, lang]);
 
-  const messagesContainerRef = useRef(null);
-  const messagesEndRef = useRef(null);
-  const fileInputRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const recognitionRef = useRef(null);
-
   const scrollToBottom = () => {
-    // Only scroll the inner message container, NEVER scroll the outer window/page
     if (messagesContainerRef.current) {
       messagesContainerRef.current.scrollTo({
         top: messagesContainerRef.current.scrollHeight,
@@ -96,8 +158,11 @@ export default function ChatbotDrawer({ isOpen = true, onClose, activeParcel, la
     }
   };
 
-  useEffect(() => { scrollToBottom(); }, [messages, isLoading]);
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, streamingText, isLoading]);
 
+  // TTS read-aloud
   const stopSpeaking = useCallback(() => {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
@@ -106,83 +171,38 @@ export default function ChatbotDrawer({ isOpen = true, onClose, activeParcel, la
     setCurrentlySpeakingIdx(null);
   }, []);
 
-  const cleanForTTS = (rawText) => {
-    if (!rawText) return '';
-    return String(rawText)
-      .replace(/^#{1,6}\s*/gm, '')
-      .replace(/\*{1,3}([^*]+)\*{1,3}/g, '$1')
-      .replace(/[*_#`~>]/g, '')
-      .replace(/[•\-\+]\s+/g, ', ')
-      .replace(/https?:\/\/\S+/g, '')
-      .replace(/\([A-Z0-9\-_]{5,}\)/g, '')
-      .replace(/\n+/g, '. ')
-      .replace(/\s{2,}/g, ' ')
-      .trim();
-  };
-
-  const speakMessage = useCallback(async (rawText, msgIdx = null) => {
+  const speakMessage = useCallback((text, msgIdx = null) => {
     if (!('speechSynthesis' in window)) return;
-
-    // Toggle off if currently speaking this exact message
     if (isSpeaking && currentlySpeakingIdx === msgIdx) {
       stopSpeaking();
       return;
     }
+    stopSpeaking();
 
-    window.speechSynthesis.cancel();
+    const clean = String(text || '').replace(/[*_#`~>•]/g, ' ').replace(/\n+/g, '. ').trim();
+    if (!clean) return;
 
-    let textToSpeak = cleanForTTS(rawText);
-    if (!textToSpeak) return;
+    const hasTa = /[\u0B80-\u0BFF]/.test(clean);
+    const targetLang = (lang === 'ta' || hasTa) ? 'ta-IN' : 'en-IN';
 
-    // Detect if text contains Tamil characters
-    const hasTamil = /[\u0B80-\u0BFF]/.test(textToSpeak);
-    let targetLang = (lang === 'ta' || hasTamil) ? 'ta-IN' : 'en-IN';
-
-    // If in Tamil mode but text came in English, translate to Tamil for authentic speech
-    if (lang === 'ta' && !hasTamil) {
-      try {
-        const res = await api.translateAdvisory(textToSpeak, 'ta');
-        if (res?.translated_text) {
-          textToSpeak = cleanForTTS(res.translated_text);
-          targetLang = 'ta-IN';
-        }
-      } catch (err) {
-        // Fall back to original
-      }
-    }
-
-    const utterance = new SpeechSynthesisUtterance(textToSpeak);
+    const utterance = new SpeechSynthesisUtterance(clean);
     utterance.lang = targetLang;
     utterance.rate = targetLang === 'ta-IN' ? 0.92 : 0.98;
-    utterance.pitch = 1.0;
 
-    // Resolve best native voice (e.g. Google Tamil, Microsoft Valluvar, or generic ta-IN)
     const voices = window.speechSynthesis.getVoices();
-    if (voices && voices.length > 0) {
-      if (targetLang === 'ta-IN') {
-        const preferred = voices.find(v => v.lang === 'ta-IN' || v.lang === 'ta_IN') ||
-                          voices.find(v => v.lang.toLowerCase().startsWith('ta')) ||
-                          voices.find(v => v.name.toLowerCase().includes('tamil'));
-        if (preferred) utterance.voice = preferred;
-      } else {
-        const preferred = voices.find(v => v.lang === 'en-IN' || v.lang === 'en_IN') ||
-                          voices.find(v => v.lang.toLowerCase().startsWith('en'));
-        if (preferred) utterance.voice = preferred;
-      }
-    }
+    const voice = voices.find(v => v.lang === targetLang) ||
+                  voices.find(v => v.lang.startsWith(targetLang.slice(0, 2)));
+    if (voice) utterance.voice = voice;
 
     utterance.onstart = () => {
       setIsSpeaking(true);
       setCurrentlySpeakingIdx(msgIdx);
     };
-
     utterance.onend = () => {
       setIsSpeaking(false);
       setCurrentlySpeakingIdx(null);
     };
-
-    utterance.onerror = (e) => {
-      console.warn('[TTS] Synthesis error:', e);
+    utterance.onerror = () => {
       setIsSpeaking(false);
       setCurrentlySpeakingIdx(null);
     };
@@ -191,27 +211,35 @@ export default function ChatbotDrawer({ isOpen = true, onClose, activeParcel, la
     window.speechSynthesis.speak(utterance);
   }, [isSpeaking, currentlySpeakingIdx, lang, stopSpeaking]);
 
-  const handleResetChat = () => {
+  // "New Chat" Handler
+  const handleNewChat = () => {
     stopSpeaking();
+    if (messages.length > 1) {
+      // Archive current session
+      const newSession = {
+        id: `session-${Date.now()}`,
+        timestamp: new Date().toLocaleString(),
+        title: messages[1]?.text?.slice(0, 35) + '...' || 'Agricultural Advisory',
+        messages: [...messages]
+      };
+      const updated = [newSession, ...savedSessions.slice(0, 9)];
+      setSavedSessions(updated);
+      try {
+        localStorage.setItem('farmwise_chat_sessions', JSON.stringify(updated));
+      } catch (e) {}
+    }
     setMessages([getWelcomeMessage(lang, activeParcel)]);
     setInput('');
     removeImage();
+    setStreamingText('');
   };
 
-  const cleanDisplayText = (text) => {
-    if (!text) return '';
-    let cleaned = text
-      .replace(/^#{1,6}\s*/gm, '')
-      .replace(/\*{1,3}([^\*]+)\*{1,3}/g, '$1')
-      .replace(/^[-*_]{3,}$/gm, '')
-      .trim();
-    if (lang === 'ta' || /[\u0B80-\u0BFF]/.test(cleaned)) {
-      cleaned = ensureTamilChatReply(cleaned);
-    }
-    return cleaned;
+  const handleLoadSession = (session) => {
+    setMessages(session.messages || []);
+    setShowHistoryModal(false);
   };
 
-  // ─── Image helpers ─────────────────────────────────────────────────────────
+  // Image Selection
   const handleImageSelect = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -226,14 +254,62 @@ export default function ChatbotDrawer({ isOpen = true, onClose, activeParcel, la
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // ─── Send message ──────────────────────────────────────────────────────────
-  const handleSend = async (textToSend = null) => {
-    const queryText = (typeof textToSend === 'string' ? textToSend : input).trim();
-    if (!queryText && !selectedImage) return;
+  // Copy message
+  const handleCopyMessage = (id, text) => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    }
+  };
 
+  // Feedback 👍 / 👎
+  const handleFeedback = (id, type) => {
+    setFeedbackGiven(prev => ({ ...prev, [id]: type }));
+  };
+
+  // Voice recording via Web Speech API
+  const startVoiceInput = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert(lang === 'ta' ? 'உங்கள் உலாவியில் குரல் உள்ளீடு ஆதரிக்கப்படவில்லை.' : 'Speech recognition not supported.');
+      return;
+    }
+
+    if (isRecording && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsRecording(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = lang === 'ta' ? 'ta-IN' : 'en-IN';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => setIsRecording(true);
+    recognition.onresult = (e) => {
+      const transcript = e.results[0][0].transcript;
+      setInput(prev => prev ? `${prev} ${transcript}` : transcript);
+      setIsRecording(false);
+    };
+    recognition.onerror = () => setIsRecording(false);
+    recognition.onend = () => setIsRecording(false);
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  };
+
+  // Send Message with Live Streaming
+  const handleSend = async (customText = null) => {
+    const query = (typeof customText === 'string' ? customText : input).trim();
+    if (!query && !selectedImage) return;
+
+    const userMessageId = `msg-user-${Date.now()}`;
     const userMsg = {
+      id: userMessageId,
       sender: 'user',
-      text: queryText || (lang === 'ta' ? 'களப் புகைப்படம் ஆய்வுக்காக பதிவேற்றப்பட்டது' : 'Uploaded field photograph for multimodal diagnosis.'),
+      text: query || (lang === 'ta' ? 'பயிர் புகைப்படம் ஆய்வுக்காக அனுப்பப்பட்டது' : 'Field photograph submitted for analysis.'),
       image: imagePreview,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
@@ -241,466 +317,452 @@ export default function ChatbotDrawer({ isOpen = true, onClose, activeParcel, la
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setIsLoading(true);
+    setStreamingText('');
+
+    const chatHistory = messages.slice(-5).map(m => ({
+      role: m.sender === 'user' ? 'user' : 'assistant',
+      content: m.text
+    }));
 
     try {
-      // Build conversation history for multi-turn contextual continuity
-      const chatHistory = messages.slice(-6).map(m => ({
-        role: m.sender === 'user' ? 'user' : 'assistant',
-        content: m.text
-      }));
+      await api.streamChatAdvisor({
+        message: query || "Analyze crop photograph",
+        surveyNumber: activeParcel?.survey_number || "1342",
+        imageFile: selectedImage,
+        history: chatHistory,
+        lang,
+        simulateOutage,
+        onToken: (tokenChunk) => {
+          setStreamingText(tokenChunk);
+        },
+        onComplete: (result) => {
+          const botMessageId = `msg-bot-${Date.now()}`;
+          const botMsg = {
+            id: botMessageId,
+            sender: 'bot',
+            text: result.reply,
+            modelUsed: result.model_used,
+            riskTier: result.risk_tier,
+            toolsCalled: result.tools_called,
+            sources: result.sources,
+            confidence: result.confidence_score,
+            isFallback: result.is_fallback,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          };
 
-      const res = await api.chatAdvisor(
-        queryText || (lang === 'ta' ? 'இந்த பயிர் புகைப்படத்தை ஆய்வு செய்யவும்' : 'Analyze this crop image'),
-        activeParcel?.survey_number || null,
-        selectedImage,
-        chatHistory,
-        lang
-      );
+          setMessages(prev => [...prev, botMsg]);
+          setStreamingText('');
+          setIsLoading(false);
+          removeImage();
 
-      const rawText = res.reply || res.response || res.message || res.answer || (typeof res === 'string' ? res : '');
-      const defaultTamil = `வணக்கம் விவசாயி அவர்களே! புல எண் #${activeParcel?.survey_number || 1342} விவரங்கள் பெறப்பட்டுள்ளன. பயிர் வளர்ச்சி, உரம் அல்லது சந்தை விலை பற்றி கேளுங்கள்.`;
-      const defaultEnglish = `Hello Farmer! For Survey Parcel #${activeParcel?.survey_number || 1342}, I am ready to answer your agronomic, fertilizer, weather, or market pricing questions.`;
-      let finalText = (rawText && typeof rawText === 'string' && rawText.trim().length > 0)
-        ? rawText.trim()
-        : (lang === 'ta' ? defaultTamil : defaultEnglish);
-
-      if (lang === 'ta' || /[\u0B80-\u0BFF]/.test(finalText)) {
-        finalText = ensureTamilChatReply(finalText);
-      }
-
-      const botMsg = {
-        sender: 'bot',
-        text: finalText,
-        modelUsed: res.model_used || res.modelUsed || 'Gemini 3.8 Flash + TNAU RAG',
-        confidence: res.confidence || res.confidence_score || 0.97,
-        sources: res.sources || ['TNAU Crop Production Guide', 'Open-Meteo ECMWF', 'eNAM Mandi Rate'],
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
-
-      setMessages(prev => {
-        const nextList = [...prev, botMsg];
-        if (isVoiceOutputEnabled) {
-          setTimeout(() => {
-            speakMessage(finalText, nextList.length - 1);
-          }, 350);
+          if (isVoiceOutputEnabled) {
+            setTimeout(() => {
+              speakMessage(result.reply, messages.length);
+            }, 300);
+          }
+        },
+        onError: (err) => {
+          console.error("Stream error:", err);
+          setIsLoading(false);
+          setStreamingText('');
         }
-        return nextList;
       });
-    } catch (err) {
-      console.error(err);
-      const fallbackText = lang === 'ta'
-        ? 'தகவல் தொடர்பில் தாமதம் ஏற்பட்டுள்ளது. தயவுசெய்து உங்கள் கேள்வியை மீண்டும் கேட்கவும்.'
-        : 'I encountered a network timeout while querying the model cluster. Please try again or rephrase your farming question.';
-      const fallbackMsg = {
-        sender: 'bot',
-        text: fallbackText,
-        modelUsed: 'System Fallback',
-        confidence: 0.5,
-        sources: ['Local Knowledge Base'],
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
-      setMessages(prev => {
-        const nextList = [...prev, fallbackMsg];
-        if (isVoiceOutputEnabled) {
-          setTimeout(() => {
-            speakMessage(fallbackText, nextList.length - 1);
-          }, 350);
-        }
-        return nextList;
-      });
-    } finally {
+
+    } catch (e) {
+      console.error("Chat error:", e);
       setIsLoading(false);
-      removeImage();
+      setStreamingText('');
     }
   };
 
-  // ─── Voice recording ────────────────────────────────────────────────────────
-  // Strategy: Use browser SpeechRecognition (instant, no server) as PRIMARY.
-  // If user has Groq key configured: ALSO capture MediaRecorder audio and
-  // send to Groq Whisper for higher accuracy after they stop speaking.
-
-  const stopRecording = useCallback(() => {
-    // Stop SpeechRecognition
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch {}
-      recognitionRef.current = null;
+  // Regenerate last response
+  const handleRegenerate = () => {
+    const lastUser = [...messages].reverse().find(m => m.sender === 'user');
+    if (lastUser) {
+      handleSend(lastUser.text);
     }
-    // Stop MediaRecorder (if running for Groq)
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      try { mediaRecorderRef.current.stop(); } catch {}
-    }
-    setIsRecording(false);
-  }, []);
-
-  const startRecording = useCallback(async () => {
-    if (isRecording) {
-      stopRecording();
-      return;
-    }
-
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      // No browser speech API — try pure Groq MediaRecorder path
-      if (!navigator.mediaDevices?.getUserMedia) {
-        alert('Your browser does not support speech recognition. Please type your question.');
-        return;
-      }
-      // Pure MediaRecorder → Groq path
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        audioChunksRef.current = [];
-        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
-        const recorder = new MediaRecorder(stream, { mimeType });
-        recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
-        recorder.onstop = async () => {
-          stream.getTracks().forEach(t => t.stop());
-          if (audioChunksRef.current.length === 0) { setIsRecording(false); return; }
-          const blob = new Blob(audioChunksRef.current, { type: mimeType });
-          setIsTranscribing(true);
-          setIsRecording(false);
-          try {
-            const result = await api.transcribeVoice(blob, lang);
-            if (result?.text) setInput(prev => prev ? prev + ' ' + result.text : result.text);
-          } catch {}
-          finally { setIsTranscribing(false); }
-        };
-        recorder.start(250); // collect chunks every 250ms
-        mediaRecorderRef.current = recorder;
-        setIsRecording(true);
-      } catch (err) {
-        alert('Microphone permission denied. Please allow microphone access and try again.');
-      }
-      return;
-    }
-
-    // ── Primary: browser SpeechRecognition (works instantly in Chrome/Edge) ──
-    const recog = new SpeechRecognition();
-    recog.lang = lang === 'ta' ? 'ta-IN' : 'en-IN';
-    recog.continuous = true;        // keep listening until manually stopped
-    recog.interimResults = true;    // show live partial results in input
-    recog.maxAlternatives = 1;
-
-    let finalTranscript = input;    // accumulate on top of existing input text
-
-    recog.onstart = () => setIsRecording(true);
-
-    recog.onresult = (e) => {
-      let interim = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) {
-          finalTranscript = (finalTranscript ? finalTranscript + ' ' : '') + t;
-        } else {
-          interim = t;
-        }
-      }
-      // Show final + live interim in the input box
-      setInput(finalTranscript + (interim ? ' ' + interim : ''));
-    };
-
-    recog.onerror = (e) => {
-      console.warn('[SpeechRecog] error:', e.error);
-      if (e.error === 'not-allowed' || e.error === 'permission-denied') {
-        alert('Microphone permission denied. Please allow microphone access in your browser settings.');
-      }
-      setIsRecording(false);
-      recognitionRef.current = null;
-    };
-
-    recog.onend = () => {
-      // Only clear isRecording if we didn't manually stop (continuous mode can auto-stop)
-      setIsRecording(false);
-      recognitionRef.current = null;
-    };
-
-    recognitionRef.current = recog;
-    try {
-      recog.start();
-    } catch (err) {
-      console.warn('[SpeechRecog] start failed:', err);
-      setIsRecording(false);
-    }
-  }, [isRecording, lang, input, stopRecording]);
-
-  const toggleRecording = () => {
-    if (isRecording) stopRecording();
-    else startRecording();
   };
 
-  if (!embedded && !isOpen) return null;
+  if (!isOpen) return null;
 
-  // ─── Render ───────────────────────────────────────────────────────────────
-  const containerClasses = embedded
-    ? "w-full h-[620px] bg-white rounded-3xl border-2 border-emerald-300/90 shadow-xl flex flex-col overflow-hidden relative z-10 transition-all"
-    : "fixed inset-y-0 right-0 z-[2000] w-full max-w-lg bg-white shadow-2xl border-l border-slate-200 flex flex-col animate-fade-in";
+  const quickPrompts = lang === 'ta' ? QUICK_PROMPTS_TA : QUICK_PROMPTS_EN;
 
   return (
-    <div className={containerClasses}>
-
-      {/* Header */}
-      <div className="p-4 bg-gradient-to-r from-emerald-800 to-green-700 text-white flex items-center justify-between shadow-xs">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center backdrop-blur-xs font-bold">
-            <Bot className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <h3 className="font-bold text-base leading-tight">
-              {lang === 'ta' ? 'ஃபார்ம்வைஸ் AI ஆலோசகர்' : 'FarmWise AI Advisor'}
-            </h3>
-            <p className="text-xs text-emerald-100 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>{lang === 'ta' ? 'நேரலை AI வழிகாட்டி' : 'Live Multi-Model Copilot'}</span>
-              {activeParcel && <span className="font-semibold text-white">• #{activeParcel.survey_number}</span>}
-            </p>
-          </div>
-        </div>
-
-        {/* Controls: Voice Output Toggle + Reset + Language toggle + Close (if drawer) */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              if (isSpeaking) stopSpeaking();
-              setIsVoiceOutputEnabled(v => !v);
-            }}
-            className={`p-1.5 rounded-lg transition-colors cursor-pointer flex items-center justify-center ${
-              isVoiceOutputEnabled ? 'bg-emerald-600/90 text-white shadow-xs' : 'bg-white/10 hover:bg-white/20 text-emerald-200'
-            }`}
-            title={
-              isVoiceOutputEnabled
-                ? (lang === 'ta' ? 'குரல் மறுமொழி இயக்கத்தில் உள்ளது (Voice Reply ON)' : 'Voice Reply ON')
-                : (lang === 'ta' ? 'குரல் மறுமொழி முடக்கப்பட்டுள்ளது (Voice Reply OFF)' : 'Voice Reply OFF')
-            }
-          >
-            {isVoiceOutputEnabled ? (
-              <Volume2 className={`w-4 h-4 ${isSpeaking ? 'animate-bounce text-emerald-200' : ''}`} />
-            ) : (
-              <VolumeX className="w-4 h-4" />
-            )}
-          </button>
-          <button
-            onClick={handleResetChat}
-            className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-emerald-100 hover:text-white transition-colors cursor-pointer"
-            title={lang === 'ta' ? 'புதிய உரையாடலை தொடங்கு' : 'Start Fresh Conversation'}
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => setLang(l => l === 'en' ? 'ta' : 'en')}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-xs font-semibold transition-colors cursor-pointer"
-            title="Toggle language for voice"
-          >
-            <Globe className="w-3.5 h-3.5" />
-            {lang === 'en' ? 'EN' : 'தமிழ்'}
-          </button>
-          {!embedded && onClose && (
-            <button
-              onClick={onClose}
-              className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Live Voice Speaking Waveform Banner */}
-      {isSpeaking && (
-        <div className="px-3.5 py-2 bg-emerald-900/95 text-emerald-100 text-xs flex items-center justify-between border-b border-emerald-700/80 animate-fade-in shadow-inner">
+    <div 
+      className={embedded 
+        ? "w-full bg-white rounded-3xl border-2 border-emerald-200 shadow-md flex flex-col h-[640px] sm:h-[680px] overflow-hidden" 
+        : "fixed inset-y-0 right-0 z-[1500] w-full max-w-md bg-white shadow-2xl border-l-2 border-emerald-200 flex flex-col h-full"}
+      role="region"
+      aria-label="AI Farm Advisor Chatbot"
+    >
+      {/* ─── 1. CHAT HEADER WITH PARCEL CONTEXT & CONTROLS ─── */}
+      <div className="px-4 py-3 bg-emerald-800 text-white shrink-0 space-y-2">
+        <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="flex h-2.5 w-2.5 relative">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400"></span>
-            </span>
-            <span className="font-semibold text-[11px] text-white">
-              {lang === 'ta' ? '🔊 AI ஆலோசகர் தமிழில் பேசுகிறார்...' : '🔊 AI is speaking advisory response...'}
-            </span>
+            <div className="w-9 h-9 rounded-xl bg-emerald-700 flex items-center justify-center shadow-xs">
+              <Bot className="w-5 h-5 text-emerald-200" />
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5">
+                <h3 className="font-black text-sm sm:text-base leading-tight">
+                  {lang === 'ta' ? 'FarmwiseAI உதவியாளர்' : 'FarmwiseAI Advisor'}
+                </h3>
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              </div>
+              <p className="text-[10px] text-emerald-200">
+                {lang === 'ta' ? 'TNAU வழிகாட்டல் • நேரடி வானிலை & சந்தை' : 'TNAU Verified • Live Weather & Mandi'}
+              </p>
+            </div>
           </div>
-          <button
-            onClick={stopSpeaking}
-            className="text-[10px] bg-white/20 hover:bg-white/30 text-white px-2 py-0.5 rounded-md font-bold transition-colors cursor-pointer"
-          >
-            {lang === 'ta' ? 'நிறுத்து (Stop)' : 'Stop'}
-          </button>
-        </div>
-      )}
 
-      {/* Messages */}
-      <div 
-        ref={messagesContainerRef}
-        className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50 overscroll-contain"
-      >
-        {messages.map((msg, idx) => (
-          <div key={idx} className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
-            <div
-              className={`max-w-[88%] rounded-2xl p-4 text-xs sm:text-sm leading-relaxed ${
-                msg.sender === 'user'
-                  ? 'bg-emerald-600 text-white rounded-br-xs shadow-xs'
-                  : 'bg-white text-slate-800 rounded-bl-xs border border-slate-200 shadow-2xs'
+          <div className="flex items-center gap-1">
+            {/* New Chat Button */}
+            <button
+              onClick={handleNewChat}
+              title={lang === 'ta' ? 'புதிய உரையாடல்' : 'New Chat'}
+              className="p-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="hidden sm:inline text-[11px]">{lang === 'ta' ? 'புதியது' : 'New'}</span>
+            </button>
+
+            {/* Saved Chat History Button */}
+            {savedSessions.length > 0 && (
+              <button
+                onClick={() => setShowHistoryModal(true)}
+                title="View Past Chats"
+                className="p-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white transition-colors cursor-pointer"
+              >
+                <History className="w-4 h-4" />
+              </button>
+            )}
+
+            {/* Voice Read-aloud Toggle */}
+            <button
+              onClick={() => {
+                stopSpeaking();
+                setIsVoiceOutputEnabled(prev => !prev);
+              }}
+              title={isVoiceOutputEnabled ? "Mute Voice Read-Aloud" : "Enable Voice Read-Aloud"}
+              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                isVoiceOutputEnabled ? 'bg-emerald-700 text-white' : 'bg-emerald-900 text-emerald-400'
               }`}
             >
-              {msg.image && (
-                <div className="mb-2 rounded-lg overflow-hidden border border-white/20 max-h-48">
-                  <img src={msg.image} alt="User upload" className="w-full h-auto object-cover" />
+              {isVoiceOutputEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            </button>
+
+            {!embedded && (
+              <button
+                onClick={onClose}
+                className="p-1.5 rounded-lg hover:bg-emerald-700 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Dynamic Active Context Pill */}
+        <div className="flex items-center justify-between text-[11px] bg-emerald-900/80 px-2.5 py-1 rounded-xl font-medium">
+          <span className="truncate">
+            📍 <b>#{activeParcel?.survey_number || '1342'}</b> • {tCrop(activeParcel?.recorded_crop || 'Coconut', lang)} • {activeParcel?.village_name || 'Sivagiri'}
+          </span>
+          <span className="text-emerald-300 font-bold shrink-0 ml-1">
+            {lang === 'ta' ? 'இணைக்கப்பட்டுள்ளது' : 'Linked'}
+          </span>
+        </div>
+
+        {/* Officer View: Outage Fallback Simulator Toggle */}
+        {isOfficerView && (
+          <div className="flex items-center justify-between bg-slate-900 px-2.5 py-1 rounded-xl text-[10px] text-amber-300 font-bold">
+            <span className="flex items-center gap-1">
+              <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+              <span>{lang === 'ta' ? 'அதிகாரி மாதிரி: முறிப்பான் உருவகப்படுத்துதல்' : 'Officer Demo: Simulate Outage'}</span>
+            </span>
+            <button
+              onClick={() => setSimulateOutage(prev => !prev)}
+              className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer transition-colors ${
+                simulateOutage ? 'bg-red-600 text-white' : 'bg-slate-800 text-slate-300'
+              }`}
+            >
+              {simulateOutage ? 'OUTAGE ON' : 'NORMAL'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ─── 2. SCROLLABLE MESSAGES CONTAINER ─── */}
+      <div 
+        ref={messagesContainerRef}
+        className="flex-1 p-4 space-y-4 overflow-y-auto bg-slate-50/60"
+      >
+        {messages.map((msg, idx) => {
+          const isUser = msg.sender === 'user';
+          const isLastBot = !isUser && idx === messages.length - 1;
+
+          return (
+            <div 
+              key={msg.id || idx}
+              className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}
+            >
+              <div 
+                className={`max-w-[88%] sm:max-w-[85%] rounded-2xl p-3.5 sm:p-4 text-xs sm:text-sm shadow-xs ${
+                  isUser 
+                    ? 'bg-emerald-700 text-white rounded-br-xs font-medium' 
+                    : 'bg-white text-slate-900 border-2 border-slate-200/90 rounded-bl-xs'
+                }`}
+              >
+                {/* User Image Attachment Preview */}
+                {msg.image && (
+                  <div className="mb-2 rounded-xl overflow-hidden border border-emerald-600 max-h-40">
+                    <img src={msg.image} alt="User field attachment" className="w-full h-full object-cover" />
+                  </div>
+                )}
+
+                {/* Formatted Text */}
+                <div className="space-y-1">
+                  {renderFormattedMarkdown(msg.text)}
                 </div>
-              )}
-              <p className="whitespace-pre-line">
-                {cleanDisplayText(msg.text) || msg.text || (lang === 'ta' ? 'வணக்கம் விவசாயி அவர்களே! விவரங்கள் பெறப்பட்டுள்ளன.' : 'Hello Farmer! Information retrieved.')}
-              </p>
-              {msg.sender === 'bot' && (
-                <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between">
+
+                {/* Bot Metadata & Citations */}
+                {!isUser && (
+                  <div className="mt-2.5 pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-1 text-[10px] text-slate-500 font-medium">
+                    <div className="flex flex-wrap items-center gap-1">
+                      {/* Risk Tier Badge */}
+                      {msg.riskTier === 'HIGH' && (
+                        <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 font-bold">
+                          Tier 3: Frontier Guard
+                        </span>
+                      )}
+                      {msg.toolsCalled && msg.toolsCalled.length > 0 && (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-bold">
+                          <Wrench className="w-2.5 h-2.5" />
+                          <span>{msg.toolsCalled.join(', ')}</span>
+                        </span>
+                      )}
+                      {msg.isFallback && (
+                        <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 font-bold">
+                          Circuit Breaker Failover
+                        </span>
+                      )}
+                    </div>
+
+                    <span className="font-mono text-[9px]">{msg.time}</span>
+                  </div>
+                )}
+
+                {/* Source Citation Tags */}
+                {!isUser && msg.sources && (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                    {msg.sources.map((s, sIdx) => (
+                      <span key={sIdx} className="text-[9px] px-1.5 py-0.2 rounded-md bg-emerald-50 text-emerald-800 font-semibold border border-emerald-200">
+                        {s}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Bot Action Tools (Copy, TTS, Feedback, Regenerate) */}
+              {!isUser && (
+                <div className="flex items-center gap-2 mt-1 px-1 text-slate-500 text-xs">
+                  {/* TTS Read Aloud */}
                   <button
-                    type="button"
                     onClick={() => speakMessage(msg.text, idx)}
-                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all cursor-pointer ${
-                      currentlySpeakingIdx === idx && isSpeaking
-                        ? 'bg-emerald-600 text-white animate-pulse shadow-xs'
-                        : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200'
-                    }`}
-                    title={currentlySpeakingIdx === idx && isSpeaking ? 'Stop speaking' : (lang === 'ta' ? 'குரலில் கேட்கவும்' : 'Listen with voice')}
+                    className="hover:text-emerald-700 transition-colors cursor-pointer p-0.5"
+                    title="Read Aloud"
                   >
-                    {currentlySpeakingIdx === idx && isSpeaking ? (
-                      <>
-                        <VolumeX className="w-3.5 h-3.5" />
-                        <span>{lang === 'ta' ? 'நிறுத்து' : 'Stop'}</span>
-                      </>
+                    {isSpeaking && currentlySpeakingIdx === idx ? (
+                      <VolumeX className="w-3.5 h-3.5 text-red-600" />
                     ) : (
-                      <>
-                        <Volume2 className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>{lang === 'ta' ? 'குரலில் கேட்க' : 'Listen'}</span>
-                      </>
+                      <Volume2 className="w-3.5 h-3.5" />
                     )}
+                  </button>
+
+                  {/* Copy Button */}
+                  <button
+                    onClick={() => handleCopyMessage(msg.id, msg.text)}
+                    className="hover:text-emerald-700 transition-colors cursor-pointer p-0.5 flex items-center gap-0.5"
+                    title="Copy Answer"
+                  >
+                    {copiedId === msg.id ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+
+                  {/* Regenerate Button (on latest bot message) */}
+                  {isLastBot && (
+                    <button
+                      onClick={handleRegenerate}
+                      className="hover:text-emerald-700 transition-colors cursor-pointer p-0.5"
+                      title="Regenerate Answer"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+
+                  {/* Feedback Thumbs */}
+                  <button
+                    onClick={() => handleFeedback(msg.id, 'up')}
+                    className={`hover:text-emerald-700 transition-colors cursor-pointer p-0.5 ${
+                      feedbackGiven[msg.id] === 'up' ? 'text-emerald-700 font-bold' : ''
+                    }`}
+                    title="Helpful"
+                  >
+                    <ThumbsUp className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => handleFeedback(msg.id, 'down')}
+                    className={`hover:text-red-700 transition-colors cursor-pointer p-0.5 ${
+                      feedbackGiven[msg.id] === 'down' ? 'text-red-600 font-bold' : ''
+                    }`}
+                    title="Not Helpful"
+                  >
+                    <ThumbsDown className="w-3.5 h-3.5" />
                   </button>
                 </div>
               )}
             </div>
-            <span className="text-[10px] text-slate-400 mt-1 px-1">{msg.time}</span>
-          </div>
-        ))}
+          );
+        })}
 
+        {/* Live Streaming Token Preview Bubble */}
         {isLoading && (
-          <div className="flex items-center gap-2 p-3 bg-white rounded-2xl border border-slate-200 w-fit text-xs text-slate-600 shadow-2xs">
-            <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
-            <span>{lang === 'ta' ? 'AI ஆலோசகர் ஆய்வு செய்கிறார்...' : 'Agent cluster is reasoning across models & tools...'}</span>
+          <div className="flex flex-col items-start animate-fade-in">
+            <div className="max-w-[85%] rounded-2xl rounded-bl-xs p-3.5 bg-white text-slate-900 border-2 border-emerald-300 shadow-sm text-xs sm:text-sm">
+              <div className="flex items-center gap-2 text-xs font-bold text-emerald-800 mb-1">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>{lang === 'ta' ? 'பதிலளிக்கிறது...' : 'Generating verified response...'}</span>
+              </div>
+              <div className="text-slate-800 font-medium whitespace-pre-line leading-relaxed">
+                {streamingText || "..."}
+                <span className="inline-block w-1.5 h-4 ml-1 bg-emerald-600 animate-pulse" />
+              </div>
+            </div>
           </div>
         )}
-
-        {isTranscribing && (
-          <div className="flex items-center gap-2 p-3 bg-amber-50 rounded-2xl border border-amber-200 w-fit text-xs text-amber-700">
-            <Loader2 className="w-4 h-4 animate-spin" />
-            <span>{lang === 'ta' ? 'குரல் பதிவு உரையாக மாற்றப்படுகிறது...' : 'Transcribing audio via Groq Whisper...'}</span>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
       </div>
 
-      {/* Quick prompts */}
-      <div className="p-2.5 bg-white border-t border-slate-200 flex gap-1.5 overflow-x-auto scrollbar-none">
-        {(lang === 'ta' ? QUICK_PROMPTS_TA : QUICK_PROMPTS).map((qp, idx) => (
+      {/* ─── 3. TAMIL QUICK-REPLY CHIPS ─── */}
+      <div className="px-3 pt-2 bg-white border-t border-slate-100 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+        {quickPrompts.map((chip, cIdx) => (
           <button
-            key={idx}
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              handleSend(qp);
-            }}
-            className="text-[11px] whitespace-nowrap px-2.5 py-1 bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-800 rounded-full border border-slate-200 hover:border-emerald-300 transition-colors cursor-pointer"
+            key={cIdx}
+            onClick={() => handleSend(chip)}
+            disabled={isLoading}
+            className="shrink-0 px-2.5 py-1 rounded-full bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-[11px] font-bold text-emerald-950 transition-colors cursor-pointer active:scale-95 disabled:opacity-50"
           >
-            {qp}
+            {chip}
           </button>
         ))}
       </div>
 
-      {/* Input tray */}
-      <div className="p-3 bg-white border-t border-slate-200">
-        {imagePreview && (
-          <div className="mb-2 flex items-center gap-2 p-1.5 bg-slate-100 rounded-xl w-fit">
-            <img src={imagePreview} alt="Preview" className="w-10 h-10 object-cover rounded-lg" />
-            <span className="text-xs text-slate-700 font-medium truncate max-w-[150px]">{selectedImage?.name}</span>
-            <button onClick={removeImage} className="p-1 hover:bg-slate-200 rounded-md text-slate-500 cursor-pointer">
-              <X className="w-3.5 h-3.5" />
-            </button>
+      {/* Image Preview bar if photo attached */}
+      {imagePreview && (
+        <div className="px-3 py-1.5 bg-emerald-50 border-t border-emerald-200 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <img src={imagePreview} alt="Attached crop" className="w-8 h-8 rounded-lg object-cover border border-slate-300" />
+            <span className="text-xs font-bold text-emerald-900 truncate max-w-[200px]">{selectedImage?.name}</span>
           </div>
-        )}
+          <button onClick={removeImage} className="text-emerald-700 hover:text-red-600 p-1 cursor-pointer">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
-        {/* Recording indicator */}
-        {isRecording && (
-          <div className="mb-2 flex items-center justify-between px-1">
-            <div className="flex items-center gap-2 text-xs text-red-600 font-semibold">
-              <span className="relative flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500" />
-              </span>
-              {lang === 'ta' ? 'பதிவு நடக்கிறது...' : 'Listening… speak now'}
-            </div>
-            <button
-              type="button"
-              onClick={stopRecording}
-              className="text-[10px] font-bold px-2 py-0.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-full border border-red-300 cursor-pointer transition-colors"
-            >
-              {lang === 'ta' ? 'நிறுத்து ✓' : 'Done ✓'}
-            </button>
-          </div>
-        )}
-
-        <div className="flex items-center gap-2">
-          {/* Camera upload */}
-          <input type="file" ref={fileInputRef} onChange={handleImageSelect} accept="image/*" className="hidden" />
+      {/* ─── 4. INPUT CONTROLS: TEXT, PHOTO ATTACH, MIC, SEND ─── */}
+      <div className="p-3 bg-white border-t-2 border-slate-200 shrink-0">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSend();
+          }}
+          className="flex items-center gap-1.5"
+        >
+          {/* Photo Attachment Button */}
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="p-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-600 transition-colors cursor-pointer"
-            title="Attach crop photograph"
+            title={lang === 'ta' ? 'புகைப்படம் இணைக்க' : 'Attach photo'}
+            className="min-h-[46px] min-w-[46px] rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors cursor-pointer"
           >
             <Camera className="w-5 h-5 text-emerald-700" />
           </button>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleImageSelect}
+            accept="image/*"
+            className="hidden"
+          />
 
-          {/* Mic button */}
+          {/* Voice Input Mic Button */}
           <button
             type="button"
-            onClick={toggleRecording}
-            disabled={isTranscribing}
-            className={`p-2.5 rounded-xl border transition-colors cursor-pointer ${
-              isRecording
-                ? 'bg-red-50 border-red-300 text-red-600 animate-pulse'
-                : 'border-slate-200 hover:bg-slate-100 text-slate-600'
+            onClick={startVoiceInput}
+            title={isRecording ? "Stop Listening" : "Speak in Tamil or English"}
+            className={`min-h-[46px] min-w-[46px] rounded-xl flex items-center justify-center transition-all cursor-pointer ${
+              isRecording 
+                ? 'bg-red-600 text-white animate-pulse' 
+                : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200'
             }`}
-            title={lang === 'ta' ? (isRecording ? 'நிறுத்து' : 'பேசவும்') : (isRecording ? 'Stop recording' : 'Speak')}
           >
-            {isRecording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5 text-emerald-700" />}
+            {isRecording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
           </button>
 
-          {/* Text input */}
+          {/* Text Input Field */}
           <input
             id="live-chatbot-input"
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            placeholder={lang === 'ta' ? 'கேள்வியை தமிழில் கேட்கலாம் (எ.கா. உரம், பூச்சி)...' : 'Ask about fertilizer, pests, spray or mandi rates...'}
-            className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/10"
+            placeholder={
+              lang === 'ta' 
+                ? 'கேள்வி கேட்கவும் (எ.கா. உரம், விலை)...' 
+                : 'Ask farm questions (e.g. fertilizer, price)...'
+            }
+            disabled={isLoading}
+            className="flex-1 min-h-[46px] px-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white"
           />
 
-          {/* Send */}
+          {/* Send Button */}
           <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              handleSend();
-            }}
-            disabled={isLoading || (!input.trim() && !selectedImage)}
-            className="p-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white rounded-xl shadow-xs transition-colors cursor-pointer"
+            type="submit"
+            disabled={(!input.trim() && !selectedImage) || isLoading}
+            className="min-h-[46px] min-w-[46px] bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-200 disabled:cursor-not-allowed text-white rounded-xl flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-xs"
           >
-            <Send className="w-5 h-5" />
+            {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
           </button>
-        </div>
+        </form>
       </div>
+
+      {/* ─── 5. SAVED CHAT SESSIONS MODAL ─── */}
+      {showHistoryModal && (
+        <div className="absolute inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-white rounded-2xl p-4 shadow-2xl border-2 border-slate-200 space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <h4 className="font-bold text-sm text-slate-900 flex items-center gap-1.5">
+                <History className="w-4 h-4 text-emerald-700" />
+                <span>{lang === 'ta' ? 'சேமிக்கப்பட்ட உரையாடல்கள்' : 'Saved Conversations'}</span>
+              </h4>
+              <button onClick={() => setShowHistoryModal(false)} className="text-slate-400 hover:text-slate-700 p-1">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {savedSessions.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => handleLoadSession(s)}
+                  className="w-full text-left p-2.5 rounded-xl border border-slate-200 hover:bg-emerald-50 hover:border-emerald-300 transition-colors"
+                >
+                  <p className="text-xs font-bold text-slate-800 truncate">{s.title}</p>
+                  <span className="text-[10px] text-slate-500 font-mono">{s.timestamp}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
