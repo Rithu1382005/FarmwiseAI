@@ -75,6 +75,17 @@ def serve_upload_image(filename: str):
 
 # --- Routes ---
 
+@app.get("/")
+def root():
+    """Root health and discovery endpoint for Render and external load balancers."""
+    return {
+        "status": "online",
+        "service": "FarmwiseAI Multi-Model Agricultural Intelligence Backend",
+        "version": settings.VERSION,
+        "health_check": "/api/health",
+        "documentation": "/docs"
+    }
+
 @app.get("/api/health")
 def health_check():
     return {
